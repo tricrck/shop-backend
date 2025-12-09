@@ -13,9 +13,12 @@ click-didyoumean==0.3.1
 click-plugins==1.1.1.2
 click-repl==0.3.0
 colorama==0.4.6
+diff-match-patch==20241021
 Django==4.2.7
+django-admin-rangefilter==0.13.3
 django-cors-headers==4.3.1
 django-filter==23.5
+django-import-export==4.3.14
 django-redis==5.4.0
 django-storages==1.14.2
 djangorestframework==3.14.0
@@ -30,7 +33,7 @@ kombu==5.6.0
 numpy==2.2.6
 packaging==25.0
 pandas==2.3.3
-Pillow>=10.2.0
+Pillow==10.1.0
 prompt_toolkit==3.0.52
 psycopg2-binary==2.9.9
 PyJWT==2.10.1
@@ -45,6 +48,7 @@ s3transfer==0.8.0
 six==1.17.0
 soupsieve==2.8
 sqlparse==0.5.3
+tablib==3.9.0
 typing_extensions==4.15.0
 tzdata==2025.2
 uritemplate==4.2.0

@@ -25,9 +25,9 @@ from products.views import CategoryViewSet, BrandViewSet, ProductViewSet, Review
 
 schema_view = get_schema_view(
     openapi.Info(
-        title="Sounds Ltd API",
+        title="SoundWaveAudio API",
         default_version='v1',
-        description="Complete API for Sounds Ltd speaker company",
+        description="Complete API for SoundWaveAudio speaker company",
         contact=openapi.Contact(email="api@soundsltd.com"),
         license=openapi.License(name="MIT License"),
     ),
@@ -44,6 +44,8 @@ router.register(r'reviews', ReviewViewSet)
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', include(router.urls)),
+    path('api/customers/', include('customers.urls')),
+    path('api/orders/', include('orders.urls')),
     path('api/auth/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('api/auth/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('swagger/', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),

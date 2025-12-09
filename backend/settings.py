@@ -16,6 +16,8 @@ from decouple import config
 from datetime import timedelta
 from dotenv import load_dotenv
 from urllib.parse import urlparse, parse_qsl
+from celery.schedules import crontab
+
 
 load_dotenv()
 
@@ -49,16 +51,20 @@ INSTALLED_APPS = [
     # Third party
     'rest_framework',
     'rest_framework_simplejwt',
+    'rest_framework_simplejwt.token_blacklist',
     'django_filters',
     'corsheaders',
     'drf_yasg',
     'storages',
+    'rangefilter',
+    'import_export',
     
     # Local apps
     'products',
     'orders',
     'customers',
     'inventory',
+    'payments',
 ]
 
 MIDDLEWARE = [
@@ -188,6 +194,45 @@ CACHES = {
             'CLIENT_CLASS': 'django_redis.client.DefaultClient',
         }
     }
+}
+
+# M-Pesa Configuration
+MPESA_CONFIG = {
+    'ENVIRONMENT': 'sandbox',  # or 'production'
+    'CONSUMER_KEY': config('MPESA_CONSUMER_KEY'),
+    'CONSUMER_SECRET': config('MPESA_CONSUMER_SECRET'),
+    'BUSINESS_SHORT_CODE': config('MPESA_BUSINESS_SHORT_CODE'),
+    'PASSKEY': config('MPESA_PASSKEY'),
+    'CALLBACK_URL': config('MPESA_CALLBACK_URL'),
+    'TIMEOUT_URL': config('MPESA_TIMEOUT_URL', default=''),
+}
+
+# Celery Configuration for async processing
+CELERY_BEAT_SCHEDULE = {
+    'check-pending-mpesa-transactions': {
+        'task': 'payments.tasks.check_pending_transactions',
+        'schedule': crontab(minute='*/5'),  # Every 5 minutes
+    },
+}
+
+# Logging
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'file': {
+            'level': 'INFO',
+            'class': 'logging.FileHandler',
+            'filename': os.path.join(BASE_DIR, 'logs', 'mpesa.log'),
+        },
+    },
+    'loggers': {
+        'payments': {
+            'handlers': ['file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+    },
 }
 
 # Password validation
