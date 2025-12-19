@@ -32,8 +32,8 @@ class WarehouseViewSet(viewsets.ModelViewSet):
     serializer_class = WarehouseSerializer
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['is_active', 'is_primary', 'city', 'state', 'country']
-    search_fields = ['name', 'code', 'address', 'city']
+    filterset_fields = ['is_active', 'is_primary', 'town', 'county', 'country']
+    search_fields = ['name', 'code', 'street_address', 'town']
     ordering_fields = ['name', 'priority', 'created_at']
     ordering = ['-priority', 'name']
     

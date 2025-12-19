@@ -118,6 +118,7 @@ class OrderViewSet(viewsets.ModelViewSet):
                     
                     # Store transaction reference in order if needed
                     order.mpesa_transaction_id = transaction.id
+                    order.mpesa_checkout_request_id = transaction.checkout_request_id
                     order.save()
                     
                 except Exception as mpesa_error:

@@ -4,6 +4,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticatedOrReadOnly, IsAuthenticated
 from django_filters.rest_framework import DjangoFilterBackend
 from django.db.models import Q, Avg, Count, F
+from django.db import models
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import cache_page
 from .models import Category, Brand, Product, ProductImage, Review
@@ -13,6 +14,7 @@ from .serializers import (CategorySerializer, BrandSerializer, ProductListSerial
                           BrandCreateUpdateSerializer)
 from .filters import ProductFilter
 from .permissions import IsAdminOrReadOnly
+from django.core.cache import cache
 
 class CategoryViewSet(viewsets.ModelViewSet):
     """
@@ -111,7 +113,16 @@ class ProductViewSet(viewsets.ModelViewSet):
     ViewSet for Product CRUD operations.
     List and Retrieve are public, Create/Update/Delete require admin.
     """
-    queryset = Product.objects.filter(is_active=True).prefetch_related('images', 'reviews')
+    queryset = Product.objects.filter(is_active=True).select_related(
+        'category', 'brand'  # Use select_related for foreign keys
+    ).prefetch_related(
+        'images',  # Prefetch images
+        models.Prefetch(  # Prefetch reviews with aggregation
+            'reviews',
+            queryset=Review.objects.filter(is_approved=True),
+            to_attr='approved_reviews'
+        )
+    )
     permission_classes = [IsAdminOrReadOnly]
     lookup_field = 'slug'
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
@@ -130,7 +141,16 @@ class ProductViewSet(viewsets.ModelViewSet):
 
     @method_decorator(cache_page(60 * 5))
     def list(self, request, *args, **kwargs):
-        return super().list(request, *args, **kwargs)
+        # Add cache key based on query params
+        cache_key = f"products_list_{hash(str(request.GET))}"
+        cached_data = cache.get(cache_key)
+        
+        if cached_data is not None:
+            return Response(cached_data)
+        
+        response = super().list(request, *args, **kwargs)
+        cache.set(cache_key, response.data, timeout=60 * 5)
+        return response
 
     def perform_create(self, serializer):
         """Create a new product"""
@@ -249,10 +269,14 @@ class ReviewViewSet(viewsets.ModelViewSet):
     ordering = ['-created_at']
 
     def get_queryset(self):
-        """Show all reviews to admins, only approved to others"""
-        queryset = Review.objects.all()
-        if not self.request.user.is_staff:
-            queryset = queryset.filter(is_approved=True)
+        queryset = self.queryset
+        
+        # Annotate with review stats to avoid N+1 queries
+        queryset = queryset.annotate(
+            review_count=models.Count('reviews', filter=models.Q(reviews__is_approved=True)),
+            average_rating=models.Avg('reviews__rating', filter=models.Q(reviews__is_approved=True))
+        )
+        
         return queryset
 
     def perform_create(self, serializer):

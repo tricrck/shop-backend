@@ -13,11 +13,20 @@ class ProductFilter(django_filters.FilterSet):
         model = Product
         fields = ['category', 'brand', 'condition', 'is_featured']
 
+    @property
+    def qs(self):
+        # Get the base queryset
+        qs = super().qs
+        
+        # Apply custom filters more efficiently
+        return qs
+    
     def filter_in_stock(self, queryset, name, value):
+        # Use database filter directly
         if value:
             return queryset.filter(stock_quantity__gt=0)
         return queryset
-
+    
     def filter_on_sale(self, queryset, name, value):
         if value:
             return queryset.filter(discount_percentage__gt=0)

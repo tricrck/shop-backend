@@ -1,9 +1,8 @@
-from django.db.models.signals import post_save, pre_save
+from django.db.models.signals import post_save, pre_save, pre_delete
 from django.dispatch import receiver
 from django.db.models import Sum
-from .models import WarehouseStock, StockAlert, StockMovement, InventoryTransfer
+from .models import WarehouseStock, StockAlert, StockMovement, InventoryTransfer, TransferItem, StockCount, StockCountItem
 from orders.models import Order, OrderItem
-from products.models import Product
 
 
 @receiver(post_save, sender=WarehouseStock)
@@ -72,6 +71,7 @@ def check_stock_levels(sender, instance, created, **kwargs):
 @receiver(post_save, sender=StockMovement)
 def sync_product_total_stock(sender, instance, created, **kwargs):
     """Sync product's total stock across all warehouses"""
+    instance.product.update_from_warehouse_stock()
     if created:
         product = instance.product
         total_stock = WarehouseStock.objects.filter(
@@ -175,3 +175,117 @@ def track_order_status_change(sender, instance, **kwargs):
             instance._previous_status = None
     else:
         instance._previous_status = None
+
+
+@receiver(post_save, sender=WarehouseStock)
+def update_product_stock_on_warehouse_change(sender, instance, created, **kwargs):
+    """Update product's total stock when warehouse stock changes"""
+    try:
+        from products.models import Product
+        # Get the product instance
+        product = instance.product
+        
+        # Recalculate total stock across all warehouses
+        total_stock = WarehouseStock.objects.filter(
+            product=product
+        ).aggregate(total=Sum('quantity'))['total'] or 0
+        
+        # Update product's stock_quantity
+        product.stock_quantity = total_stock
+        product.save(update_fields=['stock_quantity'])
+    except Exception as e:
+        print(f"Error updating product stock: {e}")
+
+
+@receiver(post_save, sender=StockCountItem)
+def update_stock_after_count(sender, instance, created, **kwargs):
+    """Update warehouse stock and product stock after stock count"""
+    if instance.is_counted and instance.has_discrepancy:
+        try:
+            # Get warehouse stock
+            warehouse_stock = WarehouseStock.objects.get(
+                warehouse=instance.stock_count.warehouse,
+                product=instance.product
+            )
+            
+            # Only update if there's a discrepancy
+            if instance.discrepancy != 0:
+                # Update warehouse stock
+                warehouse_stock.quantity = instance.counted_quantity
+                warehouse_stock.last_counted = instance.counted_at
+                warehouse_stock.save()
+                
+                # This will trigger update_product_stock_on_warehouse_change
+                # via the WarehouseStock post_save signal
+        except WarehouseStock.DoesNotExist:
+            pass
+
+
+@receiver(post_save, sender=StockMovement)
+def sync_product_total_stock(sender, instance, created, **kwargs):
+    """Sync product's total stock across all warehouses"""
+    if created and instance.warehouse and instance.product:
+        try:
+            from products.models import Product
+            product = instance.product
+            
+            # Recalculate total stock across all warehouses
+            total_stock = WarehouseStock.objects.filter(
+                product=product
+            ).aggregate(total=Sum('quantity'))['total'] or 0
+            
+            # Update product's stock_quantity
+            product.stock_quantity = total_stock
+            product.save(update_fields=['stock_quantity'])
+        except Exception as e:
+            print(f"Error syncing product stock from movement: {e}")
+
+
+@receiver(post_save, sender=InventoryTransfer)
+def sync_product_stock_after_transfer(sender, instance, **kwargs):
+    """Sync product stock after transfer completion"""
+    if instance.status == 'received':
+        try:
+            from products.models import Product
+            # Get all products involved in the transfer
+            product_ids = instance.items.values_list('product', flat=True).distinct()
+            
+            for product_id in product_ids:
+                try:
+                    product = Product.objects.get(id=product_id)
+                    # Recalculate total stock
+                    total_stock = WarehouseStock.objects.filter(
+                        product=product
+                    ).aggregate(total=Sum('quantity'))['total'] or 0
+                    
+                    product.stock_quantity = total_stock
+                    product.save(update_fields=['stock_quantity'])
+                except Product.DoesNotExist:
+                    continue
+        except Exception as e:
+            print(f"Error syncing product stock after transfer: {e}")
+
+
+@receiver(post_save, sender=StockCount)
+def sync_product_stock_after_count(sender, instance, **kwargs):
+    """Sync product stock after stock count completion"""
+    if instance.status == 'completed':
+        try:
+            from products.models import Product
+            # Get all products in the stock count
+            product_ids = instance.items.values_list('product', flat=True).distinct()
+            
+            for product_id in product_ids:
+                try:
+                    product = Product.objects.get(id=product_id)
+                    # Recalculate total stock
+                    total_stock = WarehouseStock.objects.filter(
+                        product=product
+                    ).aggregate(total=Sum('quantity'))['total'] or 0
+                    
+                    product.stock_quantity = total_stock
+                    product.save(update_fields=['stock_quantity'])
+                except Product.DoesNotExist:
+                    continue
+        except Exception as e:
+            print(f"Error syncing product stock after count: {e}")

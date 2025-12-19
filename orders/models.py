@@ -66,6 +66,19 @@ class Order(models.Model):
     estimated_delivery = models.DateTimeField(null=True, blank=True)
     shipped_date = models.DateTimeField(null=True, blank=True)
     delivered_date = models.DateTimeField(null=True, blank=True)
+
+    # M-Pesa integration fields
+    mpesa_checkout_request_id = models.CharField(
+        max_length=255, 
+        blank=True, 
+        null=True,
+        help_text="M-Pesa STK Push checkout request ID"
+    )
+    mpesa_transaction_id = models.IntegerField(
+        blank=True, 
+        null=True,
+        help_text="Reference to MpesaTransaction model"
+    )
     
     # Customer notes
     customer_notes = models.TextField(blank=True)

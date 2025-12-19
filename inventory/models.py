@@ -51,7 +51,7 @@ class Warehouse(models.Model):
 
     @property
     def capacity_percentage(self):
-        if self.max_capacity:
+        if self.max_capacity and self.max_capacity > 0:
             return (self.current_capacity / self.max_capacity) * 100
         return 0
 

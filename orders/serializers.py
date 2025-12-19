@@ -158,7 +158,8 @@ class OrderDetailSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'order_number', 'customer', 'customer_details',
             'status', 'status_display', 'payment_status', 'payment_status_display',
-            'payment_method', 'payment_method_display', 'payment_id',
+            'payment_method', 'payment_method_display', 'payment_id', 'mpesa_checkout_request_id',
+            'mpesa_transaction_id',
             
             # Addresses
             'billing_address', 'shipping_address',

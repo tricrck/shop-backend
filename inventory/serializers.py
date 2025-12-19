@@ -16,7 +16,7 @@ class WarehouseSerializer(serializers.ModelSerializer):
     class Meta:
         model = Warehouse
         fields = [
-            'id', 'name', 'code', 'address', 'city', 'state', 'country',
+            'id', 'name', 'code', 'street_address', 'town', 'county', 'country',
             'postal_code', 'phone', 'email', 'manager', 'manager_name',
             'is_active', 'is_primary', 'priority', 'max_capacity',
             'current_capacity', 'capacity_percentage', 'total_products',

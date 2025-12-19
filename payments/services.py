@@ -164,7 +164,8 @@ class MpesaAPIClient:
             
             transaction.response_payload = response_data
             
-            if response.status_code == 200 and response_data.get('ResponseCode') == '0':
+            response_code = str(response_data.get('ResponseCode', ''))
+            if response.status_code == 200 and response_code == '0':
                 # Success
                 transaction.merchant_request_id = response_data.get('MerchantRequestID')
                 transaction.checkout_request_id = response_data.get('CheckoutRequestID')
@@ -179,7 +180,6 @@ class MpesaAPIClient:
                 transaction.failed_at = timezone.now()
                 
                 logger.error(f"STK Push failed: {transaction.result_desc}")
-            
             transaction.save()
             return transaction
             
@@ -194,6 +194,7 @@ class MpesaAPIClient:
     
     def query_stk_status(self, checkout_request_id):
         """Query the status of an STK Push transaction"""
+        
         timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
         password = self.generate_password(timestamp)
         
@@ -446,20 +447,106 @@ class MpesaPaymentService:
     def check_payment_status(self, checkout_request_id):
         """
         Check payment status for a checkout request
+        Query M-Pesa API if transaction is still pending
         """
         try:
             transaction = MpesaTransaction.objects.get(
                 checkout_request_id=checkout_request_id
             )
             
-            # If still processing, query M-Pesa API
-            if transaction.is_pending:
-                status_response = self.api_client.query_stk_status(checkout_request_id)
-                # Update based on response
-                # (Implementation depends on API response structure)
+            # If still processing, query M-Pesa API for latest status
             
+            if transaction.is_pending:
+                logger.info(f"Querying M-Pesa API for transaction status: {checkout_request_id}")
+                
+                try:
+                    status_response = self.api_client.query_stk_status(checkout_request_id)
+                    logger.info(f"M-Pesa status response: {status_response}")
+                    
+                    # Parse M-Pesa response
+                    result_code = status_response.get('ResultCode')
+                    result_desc = status_response.get('ResultDesc', '')
+                    
+                    if result_code is not None:
+                        if result_code == '0':
+                            # Transaction successful - extract metadata
+                            result_parameters = status_response.get('ResultParameter', [])
+                            
+                            # Convert list of parameters to dict
+                            params_dict = {}
+                            if isinstance(result_parameters, list):
+                                for param in result_parameters:
+                                    if isinstance(param, dict):
+                                        key = param.get('Key')
+                                        value = param.get('Value')
+                                        if key:
+                                            params_dict[key] = value
+                            
+                            # Extract transaction details
+                            mpesa_receipt_number = params_dict.get('ReceiptNo') or params_dict.get('MpesaReceiptNumber')
+                            transaction_date_str = params_dict.get('TransactionCompletedDateTime') or params_dict.get('TransactionDate')
+                            
+                            if mpesa_receipt_number and transaction_date_str:
+                                # Parse transaction date
+                                try:
+                                    # M-Pesa date format: YYYYMMDDHHmmss or DD.MM.YYYY HH:mm:ss
+                                    if '.' in transaction_date_str:
+                                        transaction_date = datetime.strptime(transaction_date_str, '%d.%m.%Y %H:%M:%S')
+                                    else:
+                                        transaction_date = datetime.strptime(str(transaction_date_str), '%Y%m%d%H%M%S')
+                                    
+                                    transaction_date = timezone.make_aware(transaction_date)
+                                except (ValueError, TypeError) as e:
+                                    logger.error(f"Error parsing transaction date: {e}")
+                                    transaction_date = timezone.now()
+                                
+                                # Mark transaction as completed
+                                transaction.mark_completed(
+                                    mpesa_receipt_number=mpesa_receipt_number,
+                                    transaction_date=transaction_date,
+                                    callback_data=status_response
+                                )
+                                
+                                # Update order if exists
+                                if transaction.order:
+                                    MpesaCallbackProcessor._update_order_payment(
+                                        transaction.order, 
+                                        transaction
+                                    )
+                                
+                                logger.info(f"Transaction {checkout_request_id} marked as completed")
+                            else:
+                                logger.warning(f"Missing receipt number or date in successful response")
+                        
+                        elif result_code in ['1032', '1037']:
+                            # User cancelled or timeout - mark as cancelled
+                            transaction.status = 'cancelled' if result_code == '1032' else 'timeout'
+                            transaction.result_code = int(result_code)
+                            transaction.result_desc = result_desc
+                            transaction.failed_at = timezone.now()
+                            transaction.save()
+                            logger.info(f"Transaction {checkout_request_id} marked as {transaction.status}")
+                        
+                        else:
+                            # Transaction failed
+                            transaction.mark_failed(
+                                result_code=int(result_code),
+                                result_desc=result_desc,
+                                callback_data=status_response
+                            )
+                            logger.info(f"Transaction {checkout_request_id} marked as failed")
+                    
+                except Exception as e:
+                    logger.error(f"Error querying M-Pesa status: {str(e)}", exc_info=True)
+                    # Don't update transaction status on query error
+                    # Return existing transaction data
+            
+            # Refresh transaction from database to get latest data
+            transaction.refresh_from_db()
             return transaction
+            
         except MpesaTransaction.DoesNotExist:
+            logger.error(f"Transaction not found: {checkout_request_id}")
             return None
     
     def process_refund(self, order, amount, reason):

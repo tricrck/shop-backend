@@ -1,6 +1,7 @@
 from django.db import models
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.utils.text import slugify
+# from inventory.models import WarehouseStock
 
 class Category(models.Model):
     name = models.CharField(max_length=100, unique=True)
@@ -88,6 +89,12 @@ class Product(models.Model):
             models.Index(fields=['slug']),
             models.Index(fields=['sku']),
             models.Index(fields=['category', 'is_active']),
+            models.Index(fields=['brand', 'is_active']),
+            models.Index(fields=['price']),  # Add this for price filtering
+            models.Index(fields=['stock_quantity']),  # Add this for stock filtering
+            models.Index(fields=['is_active', 'is_featured']),  # For featured queries
+            models.Index(fields=['discount_percentage']),  # For sale queries
+            models.Index(fields=['created_at']),
         ]
 
     def save(self, *args, **kwargs):
@@ -100,6 +107,47 @@ class Product(models.Model):
         if self.discount_percentage > 0:
             return self.price - (self.price * self.discount_percentage / 100)
         return self.price
+    @property
+    def warehouse_stock_summary(self):
+        """Get stock across all warehouses"""
+        try:
+            from inventory.models import WarehouseStock
+            from django.db.models import Sum, Count, F
+            return WarehouseStock.objects.filter(product=self).aggregate(
+                total_quantity=Sum('quantity'),
+                total_reserved=Sum('reserved_quantity'),
+                total_damaged=Sum('damaged_quantity'),
+                total_available=Sum(F('quantity') - F('reserved_quantity') - F('damaged_quantity')),
+                warehouse_count=Count('warehouse', distinct=True)
+            )
+        except ImportError:
+            return None
+
+    @property
+    def available_quantity(self):
+        """Total available across all warehouses"""
+        try:
+            from inventory.models import WarehouseStock
+            from django.db.models import Sum, F
+            result = WarehouseStock.objects.filter(product=self).aggregate(
+                total=Sum(F('quantity') - F('reserved_quantity') - F('damaged_quantity'))
+            )
+            return result['total'] or 0
+        except ImportError:
+            return self.stock_quantity
+
+    def update_from_warehouse_stock(self):
+        """Sync product stock from warehouse totals"""
+        try:
+            from inventory.models import WarehouseStock
+            from django.db.models import Sum
+            total = WarehouseStock.objects.filter(product=self).aggregate(
+                total=Sum('quantity')
+            )['total'] or 0
+            self.stock_quantity = total
+            self.save(update_fields=['stock_quantity'])
+        except ImportError:
+            pass
 
     @property
     def is_low_stock(self):

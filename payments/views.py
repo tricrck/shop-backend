@@ -274,39 +274,100 @@ class CheckPaymentStatusView(APIView):
     permission_classes = [IsAuthenticated]
     
     def post(self, request):
+        logger.info("=== Check Payment Status Request ===")
+        logger.info(f"Request Data: {request.data}")
+        logger.info(f"User: {request.user}")
+        
         serializer = CheckPaymentStatusSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        
+        if not serializer.is_valid():
+            logger.error(f"Validation Errors: {serializer.errors}")
+            return Response({
+                'error': 'Invalid request data',
+                'details': serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
         
         checkout_request_id = serializer.validated_data['checkout_request_id']
+        logger.info(f"Looking for transaction with checkout_request_id: {checkout_request_id}")
         
         try:
-            transaction = MpesaTransaction.objects.get(
-                checkout_request_id=checkout_request_id
-            )
+            transaction = MpesaTransaction.objects.select_related(
+                'order', 'customer', 'order__customer', 'order__customer__user', 'customer__user'
+            ).get(checkout_request_id=checkout_request_id)
             
-            # Verify ownership
-            if (transaction.customer and transaction.customer.user != request.user and 
-                transaction.order and transaction.order.customer.user != request.user and
-                not request.user.is_staff):
+            logger.info(f"Found transaction: {transaction.id}")
+            logger.info(f"Transaction status: {transaction.status}")
+            
+            # Verify ownership first
+            has_permission = False
+            
+            if request.user.is_staff:
+                has_permission = True
+            elif transaction.customer and hasattr(transaction.customer, 'user'):
+                if transaction.customer.user == request.user:
+                    has_permission = True
+            elif transaction.order and hasattr(transaction.order, 'customer'):
+                if hasattr(transaction.order.customer, 'user'):
+                    if transaction.order.customer.user == request.user:
+                        has_permission = True
+            
+            if not has_permission:
+                logger.warning(f"Permission denied for user {request.user.id} on transaction {transaction.id}")
                 return Response({
                     'error': 'Permission denied'
                 }, status=status.HTTP_403_FORBIDDEN)
             
-            return Response({
+            # If transaction is still processing, query M-Pesa API for latest status
+            if transaction.status == 'processing':
+                logger.info(f"Transaction {transaction.id} is still processing, querying M-Pesa API")
+                try:
+                    service = MpesaPaymentService()
+                    updated_transaction = service.check_payment_status(checkout_request_id)
+                    if updated_transaction:
+                        transaction = updated_transaction
+                        logger.info(f"Transaction status updated to: {transaction.status}")
+                except Exception as e:
+                    logger.error(f"Error querying M-Pesa API: {str(e)}")
+                    # Continue with existing transaction data even if API query fails
+            
+            # Prepare response
+            response_data = {
                 'transaction': MpesaTransactionSerializer(transaction).data,
-                'order': {
+                'statusInfo': {
+                    'transaction': {
+                        'status': transaction.status,
+                        'result_code': transaction.result_code,
+                        'result_desc': transaction.result_desc,
+                        'mpesa_receipt_number': transaction.mpesa_receipt_number,
+                        'is_successful': transaction.is_successful,
+                        'is_pending': transaction.is_pending,
+                    }
+                }
+            }
+            
+            if transaction.order:
+                response_data['order'] = {
                     'id': transaction.order.id,
                     'order_number': transaction.order.order_number,
                     'payment_status': transaction.order.payment_status,
                     'status': transaction.order.status
-                } if transaction.order else None
-            })
+                }
+            
+            logger.info(f"Successfully returning transaction data for {checkout_request_id}")
+            return Response(response_data)
             
         except MpesaTransaction.DoesNotExist:
+            logger.error(f"Transaction not found for checkout_request_id: {checkout_request_id}")
             return Response({
-                'error': 'Transaction not found'
+                'error': 'Transaction not found',
+                'checkout_request_id': checkout_request_id
             }, status=status.HTTP_404_NOT_FOUND)
-
+        except Exception as e:
+            logger.error(f"Error checking payment status: {str(e)}", exc_info=True)
+            return Response({
+                'error': 'Internal server error',
+                'details': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class MpesaRefundViewSet(viewsets.ReadOnlyModelViewSet):
     """

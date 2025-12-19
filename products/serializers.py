@@ -76,8 +76,13 @@ class ProductListSerializer(serializers.ModelSerializer):
     brand_name = serializers.CharField(source='brand.name', read_only=True)
     brand_slug = serializers.CharField(source='brand.slug', read_only=True)
     primary_image = serializers.SerializerMethodField()
-    average_rating = serializers.SerializerMethodField()
-    review_count = serializers.SerializerMethodField()
+    average_rating = serializers.DecimalField(
+        max_digits=3, decimal_places=1, 
+        read_only=True, source='annotated_avg_rating'  # Use annotated field
+    )
+    review_count = serializers.IntegerField(
+        read_only=True, source='annotated_review_count'  # Use annotated field
+    )
 
     class Meta:
         model = Product
@@ -88,11 +93,11 @@ class ProductListSerializer(serializers.ModelSerializer):
                   'created_at']
 
     def get_primary_image(self, obj):
-        primary = obj.images.filter(is_primary=True).first()
-        if primary:
-            return primary.image.url
-        first_image = obj.images.first()
-        return first_image.image.url if first_image else None
+        # Cache primary image lookup
+        if not hasattr(obj, '_primary_image_cache'):
+            primary = obj.images.filter(is_primary=True).first()
+            obj._primary_image_cache = primary.image.url if primary else None
+        return obj._primary_image_cache
 
     def get_average_rating(self, obj):
         reviews = obj.reviews.filter(is_approved=True)

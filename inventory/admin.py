@@ -10,7 +10,7 @@ from .models import (
 @admin.register(Warehouse)
 class WarehouseAdmin(admin.ModelAdmin):
     list_display = ['name', 'code', 'town', 'county', 'is_active', 'is_primary', 
-                   'priority', 'capacity_usage', 'total_products']
+                   'priority', 'capacity_usage']
     list_filter = ['is_active', 'is_primary', 'county', 'country']
     search_fields = ['name', 'code', 'town', 'street_address']
     ordering = ['-priority', 'name']
@@ -36,13 +36,16 @@ class WarehouseAdmin(admin.ModelAdmin):
     )
     
     def capacity_usage(self, obj):
-        if obj.max_capacity:
-            percentage = obj.capacity_percentage
-            color = 'green' if percentage < 70 else 'orange' if percentage < 90 else 'red'
-            return format_html(
-                '<span style="color: {};">{:.1f}%</span>',
-                color, percentage
-            )
+        try:
+            if obj.max_capacity and obj.max_capacity > 0:
+                percentage = obj.capacity_percentage
+                color = 'green' if percentage < 70 else 'orange' if percentage < 90 else 'red'
+                return format_html(
+                    '<span style="color: {};">{:.1f}%</span>',
+                    color, percentage
+                )
+        except Exception:
+            pass
         return 'N/A'
     capacity_usage.short_description = 'Capacity Usage'
 
@@ -76,19 +79,28 @@ class WarehouseStockAdmin(admin.ModelAdmin):
     )
     
     def product_info(self, obj):
-        return f"{obj.product.name} ({obj.product.sku})"
+        try:
+            return f"{obj.product.name} ({obj.product.sku})"
+        except Exception:
+            return "N/A"
     product_info.short_description = 'Product'
     
     def available(self, obj):
-        avail = obj.available_quantity
-        color = 'green' if avail > obj.reorder_point else 'orange' if avail > 0 else 'red'
-        return format_html('<span style="color: {};">{}</span>', color, avail)
+        try:
+            avail = obj.available_quantity
+            color = 'green' if avail > obj.reorder_point else 'orange' if avail > 0 else 'red'
+            return format_html('<span style="color: {};">{}</span>', color, avail)
+        except Exception:
+            return "N/A"
     available.short_description = 'Available'
     
     def needs_reorder_indicator(self, obj):
-        if obj.needs_reorder:
-            return format_html('<span style="color: red;">⚠️ Yes</span>')
-        return format_html('<span style="color: green;">✓ No</span>')
+        try:
+            if obj.needs_reorder:
+                return format_html('<span style="color: red;">⚠️ Yes</span>')
+            return format_html('<span style="color: green;">✓ No</span>')
+        except Exception:
+            return "N/A"
     needs_reorder_indicator.short_description = 'Needs Reorder'
 
 
@@ -123,13 +135,19 @@ class StockMovementAdmin(admin.ModelAdmin):
     )
     
     def product_info(self, obj):
-        return f"{obj.product.name} ({obj.product.sku})"
+        try:
+            return f"{obj.product.name} ({obj.product.sku})"
+        except Exception:
+            return "N/A"
     product_info.short_description = 'Product'
     
     def quantity_change(self, obj):
-        color = 'green' if obj.quantity > 0 else 'red'
-        symbol = '+' if obj.quantity > 0 else ''
-        return format_html('<span style="color: {};">{}{}</span>', color, symbol, obj.quantity)
+        try:
+            color = 'green' if obj.quantity > 0 else 'red'
+            symbol = '+' if obj.quantity > 0 else ''
+            return format_html('<span style="color: {};">{}{}</span>', color, symbol, obj.quantity)
+        except Exception:
+            return "N/A"
     quantity_change.short_description = 'Change'
 
 
@@ -143,7 +161,7 @@ class TransferItemInline(admin.TabularInline):
 @admin.register(InventoryTransfer)
 class InventoryTransferAdmin(admin.ModelAdmin):
     list_display = ['transfer_number', 'from_warehouse', 'to_warehouse', 'status', 
-                   'total_items', 'requested_at', 'requested_by']
+                   'requested_at', 'requested_by']
     list_filter = ['status', 'from_warehouse', 'to_warehouse', 'requested_at']
     search_fields = ['transfer_number', 'tracking_number', 'notes']
     ordering = ['-requested_at']
@@ -198,7 +216,10 @@ class StockAlertAdmin(admin.ModelAdmin):
     )
     
     def product_info(self, obj):
-        return f"{obj.product.name} ({obj.product.sku})"
+        try:
+            return f"{obj.product.name} ({obj.product.sku})"
+        except Exception:
+            return "N/A"
     product_info.short_description = 'Product'
     
     actions = ['resolve_alerts']
@@ -221,7 +242,7 @@ class StockCountItemInline(admin.TabularInline):
 @admin.register(StockCount)
 class StockCountAdmin(admin.ModelAdmin):
     list_display = ['count_number', 'warehouse', 'count_type', 'status', 
-                   'scheduled_date', 'assigned_to', 'discrepancy_count']
+                   'scheduled_date', 'assigned_to']
     list_filter = ['status', 'count_type', 'warehouse', 'scheduled_date']
     search_fields = ['count_number', 'notes']
     ordering = ['-scheduled_date']
