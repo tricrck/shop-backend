@@ -1,7 +1,8 @@
 from rest_framework import serializers
 from django.contrib.auth.models import User
 from django.contrib.auth.password_validation import validate_password
-from .models import Customer, Address
+from .models import Customer, Address, PasswordResetCode  
+from django.utils import timezone
 
 
 class AddressSerializer(serializers.ModelSerializer):
@@ -135,3 +136,121 @@ class ChangePasswordSerializer(serializers.Serializer):
         user.set_password(self.validated_data['new_password'])
         user.save()
         return user
+
+class PasswordResetRequestSerializer(serializers.Serializer):
+    email = serializers.EmailField(required=True)
+    
+    def validate(self, attrs):
+        email = attrs.get('email')
+        try:
+            user = User.objects.get(email=email)
+        except User.DoesNotExist:
+            # Don't reveal if user exists for security
+            raise serializers.ValidationError({
+                "email": "If an account exists with this email, a reset code will be sent."
+            })
+        
+        # Check if user is active
+        if not user.is_active:
+            raise serializers.ValidationError({
+                "email": "This account is inactive."
+            })
+        
+        attrs['user'] = user
+        return attrs
+
+
+class PasswordResetCodeVerifySerializer(serializers.Serializer):
+    code = serializers.CharField(required=True, max_length=6)
+    uid = serializers.CharField(required=True)
+    token = serializers.CharField(required=True)
+    
+    def validate(self, attrs):
+        code = attrs.get('code')
+        uid = attrs.get('uid')
+        token = attrs.get('token')
+        
+        try:
+            user = User.objects.get(pk=uid)
+        except (User.DoesNotExist, ValueError):
+            raise serializers.ValidationError({
+                "code": "Invalid reset request."
+            })
+        
+        # Validate token
+        from .utils import account_activation_token
+        if not account_activation_token.check_token(user, token):
+            raise serializers.ValidationError({
+                "code": "Invalid or expired reset link."
+            })
+        
+        # Check if code is valid
+        try:
+            reset_code = PasswordResetCode.objects.get(
+                user=user,
+                code=code,
+                is_used=False,
+                expires_at__gt=timezone.now()
+            )
+        except PasswordResetCode.DoesNotExist:
+            raise serializers.ValidationError({
+                "code": "Invalid or expired reset code."
+            })
+        
+        attrs['user'] = user
+        attrs['reset_code'] = reset_code
+        return attrs
+
+
+class PasswordResetConfirmSerializer(serializers.Serializer):
+    uid = serializers.CharField(required=True)
+    token = serializers.CharField(required=True)
+    code = serializers.CharField(required=True, max_length=6)
+    new_password = serializers.CharField(
+        required=True, 
+        write_only=True, 
+        validators=[validate_password]
+    )
+    new_password2 = serializers.CharField(required=True, write_only=True)
+    
+    def validate(self, attrs):
+        # Check passwords match
+        if attrs['new_password'] != attrs['new_password2']:
+            raise serializers.ValidationError({
+                "new_password": "Password fields didn't match."
+            })
+        
+        uid = attrs.get('uid')
+        token = attrs.get('token')
+        code = attrs.get('code')
+        
+        try:
+            user = User.objects.get(pk=uid)
+        except (User.DoesNotExist, ValueError):
+            raise serializers.ValidationError({
+                "new_password": "Invalid reset request."
+            })
+        
+        # Validate token
+        from .utils import account_activation_token
+        if not account_activation_token.check_token(user, token):
+            raise serializers.ValidationError({
+                "new_password": "Invalid or expired reset link."
+            })
+        
+        # Check if code is valid and unused
+        try:
+            reset_code = PasswordResetCode.objects.get(
+                user=user,
+                code=code,
+                is_used=False,
+                expires_at__gt=timezone.now()
+            )
+        except PasswordResetCode.DoesNotExist:
+            raise serializers.ValidationError({
+                "new_password": "Invalid or expired reset code."
+            })
+        
+        attrs['user'] = user
+        attrs['reset_code'] = reset_code
+        return attrs

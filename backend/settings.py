@@ -124,6 +124,8 @@ DATABASES = {
         'HOST': tmpPostgres.hostname,
         'PORT': 5432,
         'OPTIONS': dict(parse_qsl(tmpPostgres.query)),
+        'CONN_MAX_AGE': 600,  # Connection pooling - keep connections alive
+        'ATOMIC_REQUESTS': False,  # Set to True if you want transaction per request
     }
 }
 
@@ -160,18 +162,52 @@ REST_FRAMEWORK = {
         'rest_framework.filters.SearchFilter',
         'rest_framework.filters.OrderingFilter',
     ],
-    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
+    # ============= PAGINATION CONFIGURATION =============
+    # Set default pagination class with customization
+    'DEFAULT_PAGINATION_CLASS': 'backend.pagination.StandardResultsSetPagination',
+    # Note: PAGE_SIZE is now handled by the custom pagination class
+    # Kept for backwards compatibility but custom classes override it
     'PAGE_SIZE': 20,
+    
+    # ============= PERFORMANCE OPTIMIZATION =============
+    # Renderer classes - remove BrowsableAPI in production
+    'DEFAULT_RENDERER_CLASSES': [
+        'rest_framework.renderers.JSONRenderer',
+        # 'rest_framework.renderers.BrowsableAPIRenderer',  # Disable in production
+    ],
+    
+    # Parser classes
+    'DEFAULT_PARSER_CLASSES': [
+        'rest_framework.parsers.JSONParser',
+        'rest_framework.parsers.MultiPartParser',
+        'rest_framework.parsers.FormParser',
+    ],
+    
+    # ============= RATE LIMITING =============
     'DEFAULT_THROTTLE_CLASSES': [
         'rest_framework.throttling.AnonRateThrottle',
         'rest_framework.throttling.UserRateThrottle'
     ],
     'DEFAULT_THROTTLE_RATES': {
         'anon': '100/hour',
-        'user': '1000/hour'
+        'user': '1000/hour',
+        'burst': '60/minute',  # Add burst protection
     },
+    
+    # ============= ERROR HANDLING =============
     'EXCEPTION_HANDLER': 'products.utils.custom_exception_handler',
+    
+    # ============= SCHEMA GENERATION =============
+    'DEFAULT_SCHEMA_CLASS': 'rest_framework.schemas.coreapi.AutoSchema',
+    
+    # ============= DATE/TIME FORMATTING =============
+    'DATETIME_FORMAT': '%Y-%m-%d %H:%M:%S',
+    'DATE_FORMAT': '%Y-%m-%d',
+    
+    # ============= METADATA =============
+    'DEFAULT_METADATA_CLASS': 'rest_framework.metadata.SimpleMetadata',
 }
+
 
 # JWT Settings
 SIMPLE_JWT = {
@@ -189,12 +225,33 @@ CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS', default='http://localhost:
 CACHES = {
     'default': {
         'BACKEND': 'django_redis.cache.RedisCache',
-        'LOCATION': config('REDIS_URL', default='redis-10952.c281.us-east-1-2.ec2.cloud.redislabs.com:10952'),
+        'LOCATION': config('REDIS_URL', default='redis://127.0.0.1:6379/1'),
         'OPTIONS': {
             'CLIENT_CLASS': 'django_redis.client.DefaultClient',
-        }
-    }
+            'CONNECTION_POOL_KWARGS': {
+                'max_connections': 50,
+                'retry_on_timeout': True,
+            },
+            'SOCKET_CONNECT_TIMEOUT': 5,
+            'SOCKET_TIMEOUT': 5,
+            'COMPRESSOR': 'django_redis.compressors.zlib.ZlibCompressor',
+            'IGNORE_EXCEPTIONS': True,  # Fail gracefully if Redis is down
+        },
+        'KEY_PREFIX': 'shop',  # Namespace your cache keys
+        'TIMEOUT': 300,  # Default 5 minutes
+    },
+    # Separate cache for pagination/counting queries
+    'pagination': {
+        'BACKEND': 'django_redis.cache.RedisCache',
+        'LOCATION': config('REDIS_URL', default='redis://127.0.0.1:6379/2'),
+        'OPTIONS': {
+            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+        },
+        'KEY_PREFIX': 'pagination',
+        'TIMEOUT': 600,  # 10 minutes for pagination
+    },
 }
+
 
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 EMAIL_HOST = 'smtp.gmail.com'
@@ -251,6 +308,9 @@ AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator'},
     {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator'},
 ]
+
+# Password Reset Settings
+PASSWORD_RESET_TIMEOUT = 86400  # 24 hours in seconds
 
 LANGUAGE_CODE = 'en-us'
 TIME_ZONE = 'UTC'

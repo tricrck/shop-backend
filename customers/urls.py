@@ -7,7 +7,10 @@ from .views import (
     UpdateProfileView,
     ChangePasswordView,
     AddressViewSet,
-    CustomerViewSet
+    CustomerViewSet,
+    PasswordResetRequestView,
+    PasswordResetCodeVerifyView,
+    PasswordResetConfirmView
 )
 
 router = DefaultRouter()
@@ -23,6 +26,11 @@ urlpatterns = [
     path('profile/', CustomerProfileView.as_view(), name='customer-profile'),
     path('profile/update/', UpdateProfileView.as_view(), name='customer-update'),
     path('password/change/', ChangePasswordView.as_view(), name='customer-change-password'),
+
+    # Password reset endpoints
+    path('password/reset/', PasswordResetRequestView.as_view(), name='password-reset-request'),
+    path('password/reset/verify/', PasswordResetCodeVerifyView.as_view(), name='password-reset-verify'),
+    path('password/reset/confirm/', PasswordResetConfirmView.as_view(), name='password-reset-confirm'),
     
     # Router URLs (addresses and customer list)
     path('', include(router.urls)),

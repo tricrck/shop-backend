@@ -7,7 +7,9 @@ from .models import Customer, Address
 class AddressInline(admin.TabularInline):
     model = Address
     extra = 0
-    fields = ['address_type', 'street_address', 'city', 'state', 'postal_code', 'country', 'is_default']
+    fields = ['address_type', 'street_address', 'city', 'county', 'subcounty', 
+              'ward', 'postal_code', 'country', 'is_default']
+    readonly_fields = ['created_at']
 
 
 class CustomerInline(admin.StackedInline):
@@ -15,7 +17,7 @@ class CustomerInline(admin.StackedInline):
     can_delete = False
     verbose_name_plural = 'Customer Profile'
     fields = ['phone', 'date_of_birth', 'profile_image', 'loyalty_points']
-    readonly_fields = ['created_at', 'updated_at']
+    readonly_fields = ['created_at', 'updated_at', 'loyalty_points']
 
 
 class UserAdmin(BaseUserAdmin):
@@ -88,19 +90,28 @@ class CustomerAdmin(admin.ModelAdmin):
 @admin.register(Address)
 class AddressAdmin(admin.ModelAdmin):
     list_display = ['get_customer_name', 'address_type', 'county', 'subcounty', 
-                    'ward', 'city', 'is_default', 'created_at']  # Updated
-    list_filter = ['address_type', 'county', 'subcounty', 'is_default', 'created_at']  # Updated
+                    'ward', 'city', 'is_default', 'created_at']
+    list_filter = ['address_type', 'county', 'is_default', 'created_at', 'country']
     search_fields = ['customer__user__username', 'customer__user__email', 
-                     'street_address', 'city', 'county', 'subcounty', 'ward', 'postal_code']  # Updated
+                     'street_address', 'city', 'county', 'subcounty', 'ward', 'postal_code']
+    readonly_fields = ['created_at']
     
     fieldsets = (
         ('Customer', {
             'fields': ('customer',)
         }),
-        ('Address Details', {
-            'fields': ('address_type', 'street_address', 'apartment', 
-                      'county', 'subcounty', 'ward', 'city', 'state', 
-                      'postal_code', 'country', 'is_default')  # Updated
+        ('Address Type', {
+            'fields': ('address_type', 'is_default')
+        }),
+        ('Location Details', {
+            'fields': ('street_address', 'apartment', 'city')
+        }),
+        ('Kenyan Administrative Divisions', {
+            'fields': ('county', 'subcounty', 'ward'),
+            'description': 'Administrative divisions specific to Kenya'
+        }),
+        ('Postal Information', {
+            'fields': ('postal_code', 'state', 'country')
         }),
         ('Metadata', {
             'fields': ('created_at',),
@@ -112,6 +123,20 @@ class AddressAdmin(admin.ModelAdmin):
         return obj.customer.user.get_full_name() or obj.customer.user.username
     get_customer_name.short_description = 'Customer'
     get_customer_name.admin_order_field = 'customer__user__username'
+    
+    def save_model(self, request, obj, form, change):
+        """
+        Handle default address logic when saving through admin.
+        If marking as default, unset other defaults of same type.
+        """
+        if obj.is_default:
+            # Unset other default addresses of the same type for this customer
+            Address.objects.filter(
+                customer=obj.customer,
+                address_type=obj.address_type
+            ).exclude(pk=obj.pk).update(is_default=False)
+        
+        super().save_model(request, obj, form, change)
 
 
 # Unregister the default User admin and register our custom one
